@@ -1,0 +1,223 @@
+---
+title: 'Model_Test  Assignment: 6 [Group: PRJ 4] '
+output:
+  word_document: default
+  pdf_document: default
+date: "2023-07-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+   
+
+## Installing and Loading the required packages
+```{r}
+# install.packages("tidyverse")
+# install.packages("caret")
+# install.packages("data.table")
+# install.packages("tidyr")
+# install.packages("stringr")
+# install.packages("forcats")
+# install.packages("ggplot2")
+# install.packages("kableExtra")
+#install.packages("kernlab")
+#install.packages("gam")
+#install.packages("kknn")
+#install.packages("igraph")
+#install.packages("randomForest")
+#install.packages("RcppEigen")
+#install.packages("ranger")
+#install.packages("wsrf")
+#install.packages("RSNNS")
+
+# Loading all needed libraries
+library(kernlab)
+library(gam)
+library(kknn)
+library(igraph)
+library(randomForest)
+library(RcppEigen)
+library(ranger)
+library(wsrf)
+library(RSNNS)
+library(dplyr)
+library(tidyverse)
+library(caret)
+library(kableExtra)
+library(tidyr)
+library(stringr)
+library(forcats)
+library(ggplot2)
+library(splines)
+library(foreach)
+library(mgcv)
+library(nlme)
+library(data.table)
+
+```
+
+## Loading the Heart dieseas(HD) Dataset
+```{r}
+HD <- read_csv("C:/Users/yashp/Downloads/archive/Hearts.csv",show_col_types = FALSE)
+
+# changing the column name for making it more descriptive.
+
+names(HD) <- c("age", "sex", "chest_pain_type", "resting_blood_pressure",
+                   "cholesterol", "fasting_blood_sugar", "rest_ecg",
+                   "max_heart_rate_achieved", "exercise_induced_angina",
+                   "st_depression", "st_slope", "num_major_vessels",
+                   "thallium_stress_test", "disease")
+
+# converts disease as  "0" or "1" for using it with confusionMatrix()
+
+HD <- mutate_at(HD, vars(disease), as.factor)
+
+
+```
+## Spliting HD dataset in HDX and validation sets
+```{r}
+set.seed(1) 
+# Validation set will be 20% of HD data because it is a little dataset
+
+test_index <- createDataPartition(y = HD$disease,
+                                  times = 1, p = 0.2, list = FALSE) 
+HDX <- HD[-test_index,]
+validation <- HD[test_index,] # we will use it only to do final test
+
+```
+
+## Spliting HDX dataset in train_set and test_set
+```{r}
+set.seed(1)
+
+test_index <- createDataPartition(y = HDX$disease,
+                                  times = 1, p = 0.2, 
+                                  list = FALSE)  # test_set 20%
+train_set <- HDX[-test_index,]
+test_set <- HDX[test_index,]
+
+
+#  We will use it to train ours models
+
+```
+
+## List of models and usinf trainControl function for tuning parameter
+```{r}
+# model list
+models <- c("glm", "lda", "naive_bayes", "svmLinear",
+            "gamLoess", "knn", "kknn","gam",
+            "rf", "ranger", "wsrf", "mlp")
+
+# using trainControl function for control tuning parameters of models
+
+control <- trainControl(method = "cv",   # cross validation
+                        number = 10,     # 10 k-folds or number 
+                        # of resampling iterations
+                        )
+
+```
+
+## Initializing varialble and using loop
+```{r}
+train_data <- train_set      
+test_data <-  test_set        
+correct_value <- test_set$disease # Correct outcome from test_set 
+
+# loop to use train and test set first, then HDX, then validation
+
+for(i in 1:2) {       
+  fits <- lapply(models, function(model){ 
+    #    print(model)  # it´s used to debug code
+    set.seed(1)
+    train(disease ~ .,
+          method = model,
+          preProcess=c("center", "scale"),   # to normalize the data
+          data = train_data,
+          trControl = control)
+  }) 
+  
+names(fits) <- models
+  
+  # to be sure that the actual value of the output do not have influence on the prediction
+  
+vali2 <- test_data %>% select(-disease) 
+  
+pred <- sapply(fits, function(object) # predicting outcome
+predict(object, newdata = vali2))
+  
+  # avg predicted values if equals to true values
+  
+  if (i == 1) acc <- colMeans(pred == correct_value)
+  
+  train_data <- HDX               # last value for data parameter
+  test_data <-  validation        # last we´ll use HDX and validation
+  correct_value <- validation$disease  # true outcome from validation set
+  
+}
+
+```
+
+### Results of different models on 2 different datasets: first train/test_set, and edx/validation
+```{r}
+
+acc    # all accuracy values with Train and Test set
+
+acc2 <- colMeans(pred == correct_value) # avg predicted values
+
+acc2   # all accuracy values with HDX and Validation set
+
+results <- acc2 - acc # accuracy diff by model
+
+
+results
+
+
+```
+# Computing balance accuracy, sensitivity, specificity,prevalence with confusionMatrix
+```{r}
+
+
+confmat_val_HD<- confusionMatrix(as.factor(pred[,11]),
+                                       validation$disease, positive = "1")
+confmat_val_HD
+
+
+```
+## Using KNN Algorithm As it is overall the best Algorithm/model/method
+```{r}
+
+
+# to be sure that the actual value of the output has not influence on the prediction
+
+vali02 <- validation %>% select(-disease)
+
+# trainControl function for control iteration model
+# we test differents parameters and choose that ones that improve accuracy
+
+control02 <- trainControl(method = "cv",   # cross validation
+                        number = 30)   # optimum k-folds or number 30
+# of resampling iterations
+
+# training KNN model
+
+set.seed(1)
+knn_model <- train(disease ~., data = HDX,
+                      method = "knn",  # KNN model
+                      preProcess=c("center", "scale"),   # to normalize the data
+                      trControl = control02)
+
+# predicting outcome
+
+prediction_knn <- predict(knn_model, newdata = vali02)
+
+# Check results with confusionMatrix() function and validation set
+
+confmat_knn<- confusionMatrix(prediction_knn,
+                                   validation$disease, positive = "1")
+confmat_knn
+
+
+```
+
